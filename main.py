@@ -1,13 +1,13 @@
 import os
 import json
 import tempfile
-import requests
 
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 
 from dotenv import load_dotenv
 from pypdf import PdfReader
+from groq import Groq
 
 
 # ==========================================
@@ -19,7 +19,16 @@ load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 if not GROQ_API_KEY:
-    raise ValueError("GROQ_API_KEY not found in .env file")
+    raise ValueError("GROQ_API_KEY not found in environment variables")
+
+
+# ==========================================
+# Initialize Groq Client
+# ==========================================
+
+client = Groq(
+    api_key=GROQ_API_KEY
+)
 
 
 # ==========================================
@@ -28,12 +37,12 @@ if not GROQ_API_KEY:
 
 app = FastAPI(
     title="AI Resume Analyzer",
-    version="3.0"
+    version="4.0"
 )
 
 
 # ==========================================
-# CORS
+# CORS Configuration
 # ==========================================
 
 app.add_middleware(
@@ -56,8 +65,6 @@ def home():
         "message": "AI Resume Analyzer Backend is Running",
         "status": "success"
     }
-
-
 # ==========================================
 # PDF Text Extraction
 # ==========================================
@@ -76,6 +83,8 @@ def extract_text(pdf_path):
             text += page_text + "\n"
 
     return text.strip()
+
+
 # ==========================================
 # Analyze Resume API
 # ==========================================
@@ -92,7 +101,7 @@ async def analyze_resume(
     try:
 
         # ----------------------------------
-        # Save Uploaded Resume
+        # Save Uploaded PDF
         # ----------------------------------
 
         with tempfile.NamedTemporaryFile(
@@ -127,13 +136,13 @@ async def analyze_resume(
             }
 
 
-        # Limit text size
+        # Limit input size
 
         resume_text = resume_text[:6000]
 
 
         # ----------------------------------
-        # Prompt for Groq
+        # AI Prompt
         # ----------------------------------
 
         prompt = f"""
@@ -149,7 +158,7 @@ Resume:
 
 Return ONLY valid JSON.
 
-Do not use markdown.
+Do NOT use markdown.
 
 Return exactly in this format:
 
@@ -175,50 +184,48 @@ Return exactly in this format:
 }}
 """
                 # ----------------------------------
-        # Groq API Request
+        # Groq API Call
         # ----------------------------------
 
-        headers = {
-            "Authorization": f"Bearer {GROQ_API_KEY}",
-            "Content-Type": "application/json"
-        }
+        response = client.chat.completions.create(
 
-        payload = {
-            "model": "llama-3.3-70b-versatile",
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "You are an expert ATS Resume Analyzer. Always return only valid JSON."
-                },
+            model="llama-3.1-8b-instant",
+
+            messages=[
                 {
                     "role": "user",
                     "content": prompt
                 }
             ],
-            "temperature": 0.3,
-            "max_tokens": 1000
-        }
 
-        response = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers=headers,
-            json=payload,
-            timeout=60
+            temperature=0.3,
+
+            max_tokens=1000
+
         )
 
-        response.raise_for_status()
 
-        data = response.json()
+        # ----------------------------------
+        # Get AI Response
+        # ----------------------------------
 
-        answer = data["choices"][0]["message"]["content"].strip()
+        answer = response.choices[0].message.content.strip()
 
 
         # ----------------------------------
         # Remove Markdown if Present
         # ----------------------------------
 
-        answer = answer.replace("```json", "")
-        answer = answer.replace("```", "")
+        answer = answer.replace(
+            "```json",
+            ""
+        )
+
+        answer = answer.replace(
+            "```",
+            ""
+        )
+
         answer = answer.strip()
 
 
@@ -227,6 +234,7 @@ Return exactly in this format:
         # ----------------------------------
 
         result = json.loads(answer)
+
 
         return result
         # ----------------------------------
@@ -245,63 +253,6 @@ Return exactly in this format:
 
 
     # ----------------------------------
-    # Groq API HTTP Errors
-    # ----------------------------------
-
-    except requests.exceptions.HTTPError as e:
-
-        details = ""
-
-        try:
-
-            details = response.json()
-
-        except Exception:
-
-            details = response.text if "response" in locals() else ""
-
-        return {
-
-            "error": "Groq API Error",
-
-            "message": str(e),
-
-            "details": details
-
-        }
-
-
-    # ----------------------------------
-    # Request Timeout
-    # ----------------------------------
-
-    except requests.exceptions.Timeout:
-
-        return {
-
-            "error": "Request Timeout",
-
-            "message": "Groq API took too long to respond. Please try again."
-
-        }
-
-
-    # ----------------------------------
-    # Connection Error
-    # ----------------------------------
-
-    except requests.exceptions.ConnectionError:
-
-        return {
-
-            "error": "Connection Error",
-
-            "message": "Unable to connect to the Groq API."
-
-        }
-
-
-    # ----------------------------------
     # File Error
     # ----------------------------------
 
@@ -311,7 +262,7 @@ Return exactly in this format:
 
             "error": "File Error",
 
-            "message": "Uploaded resume could not be processed."
+            "message": "Uploaded resume file could not be processed."
 
         }
 
@@ -329,3 +280,4 @@ Return exactly in this format:
             "message": str(e)
 
         }
+    
