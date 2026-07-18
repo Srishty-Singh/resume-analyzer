@@ -45,9 +45,14 @@ app = FastAPI(
 # CORS Configuration
 # ==========================================
 
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://frontend-x3bf.onrender.com",
+        "http://localhost:5500"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
